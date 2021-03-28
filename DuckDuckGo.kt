@@ -18,9 +18,6 @@ import java.util.concurrent.TimeUnit
 class DuckDuckGo(private val arguments :Map<String,String>,private val onGotVqd: (DuckDuckGo) -> Unit) {
 
     val h = Handler(Looper.getMainLooper())
-    val WIDE = "WIDE"
-    val TALL = "TALL"
-    val SQUARE = "SQUARE"
     private var next :String? = null
     val images  = arrayListOf<Image>()
     var size :Int= 0
@@ -101,8 +98,7 @@ class DuckDuckGo(private val arguments :Map<String,String>,private val onGotVqd:
     }
 
     fun getImages(done: (DuckDuckGo)->Unit){
-        println("we are in get image")
-
+        
         val req :Request
         try {
             val url = prepareLink()
@@ -113,7 +109,7 @@ class DuckDuckGo(private val arguments :Map<String,String>,private val onGotVqd:
         }catch (e:Exception){
             hasMore = false
             done.invoke(this)
-            println("failed preparing request")
+            
             return
         }
         client.newCall(req).enqueue(object :Callback{
@@ -214,44 +210,46 @@ class DuckDuckGo(private val arguments :Map<String,String>,private val onGotVqd:
                 return null
             }
         }
-        println("the url is $httpUrl")
         return httpUrl
     }
 
-    private var called = false
-    private var pendingcallack : ()->Unit = {}
+    private var neededMoreWhilePrefetching = false
+    /*place holder callback for when done fetching */
+    private var pendingcallback : ()->Unit = {}
     fun moreImages(done:()->Unit){
-        println("called read = $ready adn RealReady = $realReady")
         when{
-            ready == 0 -> {
-                getchunk{ready += 20;done.invoke();if (hasMore)getchunk{realReady = ready + 20}}
+            ready == 0 -> {/*if we have no images fetched yet */
+                getchunk{/*fetch 20 images */
+                    ready += 20;
+                    done.invoke();
+                    if (hasMore)getchunk{realReady = ready + 20} /*if we havent reached end of pagination,prefetch 20 images */
+                }
             }
-            realReady > ready -> {
+            realReady > ready -> { /*if we have prefetched data*/
 
-                ready  = realReady
-                done.invoke()
-                if (hasMore) getchunk {
+                ready  = realReady  /* update readyimages count to acount the prefetched images */
+                done.invoke() /* call done immidiately */
+                if (hasMore) getchunk { /*if we havent reached end of pagination,prefetch 20 images */
                     realReady += 20
-                    println("called 2nd statement read = $ready adn RealReady = $realReady")
-                    if (called){
-                        moreImages(pendingcallack )
-                        called = false
-                        println("scheduled executed read = $ready adn RealReady = $realReady")
+                    
+                    if (neededMoreWhilePrefetching){ /*if pre fetched data is consumed, prefetch again*/
+                        moreImages(pendingcallback )
+                        neededMoreWhilePrefetching = false
                     }
                 }
             }
-            realReady == ready -> {
-                println("scheduled read = $ready adn RealReady = $realReady")
-                called = true
-                pendingcallack = done
+            realReady == ready -> { /*if we have no prefetched data*/
+                neededMoreWhilePrefetching = true /*tell the prefetch to fetch again, as prefetched already consimed*/
+                pendingcallback = done /*the prefetcher will call back done instead of placeholder*/
             }
 
         }
     }
 
     fun getchunk(done:()->Unit){
+        /*fetch 20 images */
         when {
-            images.size -  (ready + offset +20)  >30 -> {
+            images.size -  (ready + offset +20)  >30 -> {/*if we have image urls get 20 images*/
                 count =0
                 for (i in (ready+offset).until(ready+offset+20)){
                     getImage(images[i]){
@@ -260,14 +258,14 @@ class DuckDuckGo(private val arguments :Map<String,String>,private val onGotVqd:
                     }
                 }
             }
-            hasMore -> {
+            hasMore -> {/*if wedont have url get url then go to tetst condition 1*/
                 try {
                     getImages {getchunk(done)}
                 }catch (e:Exception){
                     e.printStackTrace()
                 }
             }
-            else -> {
+            else -> {/*if no urls  and no more pagiantion allowed just return*/
                 done.invoke()
             }
         }
@@ -301,13 +299,13 @@ class DuckDuckGo(private val arguments :Map<String,String>,private val onGotVqd:
                             done.invoke()
                         }
                     }catch (e:Exception){
-                        println("faileeeed")
+                        
                         offset+1
                         e.printStackTrace()
                         client.newCall(req.newBuilder().url(images[ready+offset+20].thumbnail).build()).enqueue(object :Callback{
                             override fun onFailure(call: Call, e: IOException) {
                                 e.printStackTrace()
-                                println("failed")
+                                
                                 client.newCall(req).enqueue(this)
                             }
 
